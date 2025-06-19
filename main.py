@@ -64,6 +64,7 @@ def print_banner():
 async def main():
     """メイン処理"""
     server = None
+    server_task = None
     
     try:
         # バナー表示
@@ -89,13 +90,25 @@ async def main():
         logging.info("サーバーを初期化中...")
         server = TranslationWebSocketServer(config)
         
-        # シグナルハンドラー設定
-        def signal_handler(signum, frame):
-            logging.info(f"シグナル {signum} を受信しました。サーバーを停止します...")
-            asyncio.create_task(shutdown(server))
+        # 停止イベント作成
+        stop_event = asyncio.Event()
         
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        # 非同期シグナルハンドラー設定
+        def signal_handler():
+            logging.info("停止シグナルを受信しました。サーバーを停止します...")
+            stop_event.set()
+        
+        # イベントループでのシグナルハンドラー登録
+        loop = asyncio.get_running_loop()
+        
+        # Windowsでは SIGTERM が使えない場合があるため、プラットフォーム別に設定
+        if sys.platform == "win32":
+            # Windows: SIGINT のみ
+            loop.add_signal_handler(signal.SIGINT, signal_handler)
+        else:
+            # Unix系: SIGINT と SIGTERM
+            for sig in [signal.SIGINT, signal.SIGTERM]:
+                loop.add_signal_handler(sig, signal_handler)
         
         # サーバー起動
         logging.info("=" * 60)
@@ -104,16 +117,53 @@ async def main():
         logging.info("Ctrl+C で停止できます")
         logging.info("=" * 60)
         
-        await server.start_server()
+        # サーバータスク開始
+        server_task = asyncio.create_task(server.start_server())
+        
+        # 停止シグナルまたはサーバー終了を待機
+        done, pending = await asyncio.wait(
+            [server_task, asyncio.create_task(stop_event.wait())],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        
+        # 停止処理
+        if stop_event.is_set():
+            logging.info("停止シグナルによる終了処理を開始します")
+            
+            # サーバータスクをキャンセル
+            if server_task and not server_task.done():
+                server_task.cancel()
+                try:
+                    await server_task
+                except asyncio.CancelledError:
+                    pass
+            
+            # 残りのタスクもキャンセル
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        
+        logging.info("メイン処理が正常に終了しました")
         
     except KeyboardInterrupt:
         logging.info("ユーザーによる中断を検出しました")
     except Exception as e:
         logging.error(f"サーバー実行エラー: {e}")
-        sys.exit(1)
+        raise
     finally:
         if server:
             await shutdown(server)
+        
+        # 残りのタスクをクリーンアップ
+        if server_task and not server_task.done():
+            server_task.cancel()
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass
 
 
 async def shutdown(server: TranslationWebSocketServer):

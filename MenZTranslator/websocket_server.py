@@ -284,9 +284,16 @@ class TranslationWebSocketServer:
             
             logging.info(f"サーバーが起動しました: ws://{self.config.server_host}:{self.config.server_port}")
             
-            # サーバーが終了するまで待機
-            await self.server.wait_closed()
+            # サーバーが終了するまで待機（キャンセル可能）
+            try:
+                await self.server.wait_closed()
+            except asyncio.CancelledError:
+                logging.info("サーバータスクがキャンセルされました")
+                raise
             
+        except asyncio.CancelledError:
+            logging.info("サーバー起動がキャンセルされました")
+            raise
         except Exception as e:
             logging.error(f"サーバー起動エラー: {e}")
             raise
@@ -295,9 +302,35 @@ class TranslationWebSocketServer:
         """サーバー停止"""
         if self.server:
             logging.info("サーバーを停止中...")
+            
+            # 接続中のクライアントを全て切断
+            if self.connected_clients:
+                logging.info(f"{len(self.connected_clients)}個のクライアント接続を切断中...")
+                disconnect_tasks = []
+                for websocket in self.connected_clients.copy():
+                    disconnect_tasks.append(websocket.close())
+                
+                if disconnect_tasks:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*disconnect_tasks, return_exceptions=True),
+                            timeout=5.0
+                        )
+                    except asyncio.TimeoutError:
+                        logging.warning("クライアント切断がタイムアウトしました")
+            
+            # サーバーを停止
             self.server.close()
-            await self.server.wait_closed()
-            logging.info("サーバーが停止しました")
+            
+            try:
+                await asyncio.wait_for(self.server.wait_closed(), timeout=10.0)
+                logging.info("サーバーが正常に停止しました")
+            except asyncio.TimeoutError:
+                logging.warning("サーバー停止がタイムアウトしました")
+            except Exception as e:
+                logging.error(f"サーバー停止エラー: {e}")
+        else:
+            logging.info("サーバーは既に停止しています")
     
     def get_server_info(self) -> Dict:
         """サーバー情報を取得"""
