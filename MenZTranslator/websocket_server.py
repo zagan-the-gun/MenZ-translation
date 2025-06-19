@@ -7,6 +7,7 @@ import websockets
 import json
 import logging
 import uuid
+import sys
 from typing import Dict, Set, Optional, Any
 import time
 from websockets.exceptions import ConnectionClosed
@@ -274,13 +275,22 @@ class TranslationWebSocketServer:
         try:
             logging.info(f"WebSocketサーバーを開始中: {self.config.server_host}:{self.config.server_port}")
             
+            # Windowsでの特別なサーバー設定
+            server_kwargs = {
+                'max_size': 1024*1024,  # 1MB
+                'ping_interval': 30,
+                'ping_timeout': 10
+            }
+            
+            # Windows特有の問題回避
+            if sys.platform == "win32":
+                server_kwargs['reuse_port'] = False
+            
             self.server = await websockets.serve(
                 self.handle_client,
                 self.config.server_host,
                 self.config.server_port,
-                max_size=1024*1024,  # 1MB
-                ping_interval=30,
-                ping_timeout=10
+                **server_kwargs
             )
             
             logging.info(f"サーバーが起動しました: ws://{self.config.server_host}:{self.config.server_port}")
@@ -295,8 +305,19 @@ class TranslationWebSocketServer:
         except asyncio.CancelledError:
             logging.info("サーバー起動がキャンセルされました")
             raise
+        except OSError as e:
+            # ポート使用中やネットワークエラーの詳細情報
+            if e.errno == 10048:  # Windows: Address already in use
+                logging.error(f"ポート {self.config.server_port} は既に使用されています")
+            elif e.errno == 10013:  # Windows: Permission denied
+                logging.error(f"ポート {self.config.server_port} への接続が拒否されました（管理者権限が必要な可能性があります）")
+            else:
+                logging.error(f"ネットワークエラー: {type(e).__name__}: {e}")
+            logging.exception("ネットワークエラーの詳細:")
+            raise
         except Exception as e:
-            logging.error(f"サーバー起動エラー: {e}")
+            logging.error(f"サーバー起動エラー: {type(e).__name__}: {e}")
+            logging.exception("サーバー起動エラーの詳細:")
             raise
     
     async def stop_server(self):

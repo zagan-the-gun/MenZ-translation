@@ -93,7 +93,7 @@ async def main():
         # 停止イベント作成
         stop_event = asyncio.Event()
         
-        # 非同期シグナルハンドラー設定
+        # 非同期シグナルハンドラー設定（Windows対応改善）
         def signal_handler():
             logging.info("停止シグナルを受信しました。サーバーを停止します...")
             stop_event.set()
@@ -101,14 +101,23 @@ async def main():
         # イベントループでのシグナルハンドラー登録
         loop = asyncio.get_running_loop()
         
-        # Windowsでは SIGTERM が使えない場合があるため、プラットフォーム別に設定
-        if sys.platform == "win32":
-            # Windows: SIGINT のみ
-            loop.add_signal_handler(signal.SIGINT, signal_handler)
-        else:
-            # Unix系: SIGINT と SIGTERM
-            for sig in [signal.SIGINT, signal.SIGTERM]:
-                loop.add_signal_handler(sig, signal_handler)
+        # プラットフォーム別シグナル設定（Windows対応改善）
+        try:
+            if sys.platform == "win32":
+                # Windows: SIGINTのみ（より安全に設定）
+                try:
+                    loop.add_signal_handler(signal.SIGINT, signal_handler)
+                    logging.info("Windows用シグナルハンドラーを設定しました")
+                except NotImplementedError:
+                    # ProactorEventLoopではシグナルハンドラーが使えない場合
+                    logging.warning("シグナルハンドラーが使用できません（ProactorEventLoop）")
+            else:
+                # Unix系: SIGINT と SIGTERM
+                for sig in [signal.SIGINT, signal.SIGTERM]:
+                    loop.add_signal_handler(sig, signal_handler)
+                logging.info("Unix系シグナルハンドラーを設定しました")
+        except Exception as e:
+            logging.warning(f"シグナルハンドラー設定エラー: {e} - 手動停止のみ利用可能")
         
         # サーバー起動
         logging.info("=" * 60)
@@ -125,6 +134,15 @@ async def main():
             [server_task, asyncio.create_task(stop_event.wait())],
             return_when=asyncio.FIRST_COMPLETED
         )
+        
+        # 実際に完了したタスクをチェック
+        for task in done:
+            if task.exception() is not None:
+                logging.error(f"タスク例外: {type(task.exception()).__name__}: {task.exception()}")
+                raise task.exception()
+            elif task == server_task and not stop_event.is_set():
+                # サーバータスクが予期せず終了した場合
+                logging.warning("サーバータスクが予期せず終了しました")
         
         # 停止処理
         if stop_event.is_set():
@@ -151,19 +169,12 @@ async def main():
     except KeyboardInterrupt:
         logging.info("ユーザーによる中断を検出しました")
     except Exception as e:
-        logging.error(f"サーバー実行エラー: {e}")
+        logging.error(f"サーバー実行エラー: {type(e).__name__}: {str(e)}")
+        logging.exception("詳細なエラー情報:")
         raise
     finally:
         if server:
             await shutdown(server)
-        
-        # 残りのタスクをクリーンアップ
-        if server_task and not server_task.done():
-            server_task.cancel()
-            try:
-                await server_task
-            except asyncio.CancelledError:
-                pass
 
 
 async def shutdown(server: TranslationWebSocketServer):
@@ -182,11 +193,26 @@ def check_dependencies():
         import torch
         import transformers
         import websockets
+        
         logging.info("必要なライブラリが確認できました")
+        
+        # 追加の環境情報（特にWindows）
+        if sys.platform == "win32":
+            logging.info(f"Windows環境での実行: Python {sys.version}")
+            logging.info(f"PyTorch バージョン: {torch.__version__}")
+            logging.info(f"CUDA利用可能: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                logging.info(f"CUDA デバイス数: {torch.cuda.device_count()}")
+                for i in range(torch.cuda.device_count()):
+                    logging.info(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+        
         return True
     except ImportError as e:
         print(f"エラー: 必要なライブラリが不足しています: {e}")
         print("pip install -r requirements.txt を実行してください")
+        return False
+    except Exception as e:
+        logging.error(f"依存関係チェックエラー: {e}")
         return False
 
 
@@ -195,9 +221,10 @@ if __name__ == "__main__":
     if not check_dependencies():
         sys.exit(1)
     
-    # Windowsでのイベントループポリシー設定
+    # Windowsでのイベントループポリシー設定（シグナルハンドラー対応）
     if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        # SelectorEventLoopはシグナルハンドラーをサポートする
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     
     # サーバー実行
     try:
