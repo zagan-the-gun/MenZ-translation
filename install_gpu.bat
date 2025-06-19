@@ -1,67 +1,66 @@
 @echo off
-chcp 65001 > nul
 echo.
 echo ======================================================
-echo     MenZ翻訳サーバー - GPU対応インストール
+echo     MenZ Translation Server - GPU Support Install
 echo ======================================================
 echo.
 
-:: 仮想環境の確認
+:: Check virtual environment
 if not exist venv (
-    echo [ERROR] 仮想環境が見つかりません。
-    echo         setup.bat を先に実行してください。
+    echo [ERROR] Virtual environment not found.
+    echo         Please run setup.bat first.
     pause
     exit /b 1
 )
 
-echo [WARNING] NVIDIA GPU対応のPyTorchをインストールします。
-echo           NVIDIA GPU搭載PCでのみ使用してください。
+echo [WARNING] Installing NVIDIA GPU-enabled PyTorch.
+echo           Only use on PCs with NVIDIA GPU.
 echo.
-echo 続行しますか？ (y/N)
+echo Continue? ^(y/N^)
 set /p confirm=
 if /i not "%confirm%"=="y" (
-    echo [INFO] インストールをキャンセルしました。
+    echo [INFO] Installation cancelled.
     pause
     exit /b 0
 )
 
 echo.
-echo [INFO] 仮想環境をアクティベート中...
+echo [INFO] Activating virtual environment...
 call venv\Scripts\activate.bat
 
 echo.
-echo [INFO] 既存のPyTorchをアンインストール中...
+echo [INFO] Uninstalling existing PyTorch...
 pip uninstall torch torchvision torchaudio -y
 
 echo.
-echo [INFO] CUDA対応PyTorchをインストール中...
-echo [INFO] これには数分かかる場合があります...
+echo [INFO] Installing CUDA-enabled PyTorch...
+echo [INFO] This may take several minutes...
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 if %errorlevel% neq 0 (
-    echo [ERROR] GPU対応PyTorchのインストールに失敗しました。
-    echo         CPU版に戻します...
+    echo [ERROR] Failed to install GPU-enabled PyTorch.
+    echo         Reverting to CPU version...
     pip install torch torchvision torchaudio
     pause
     exit /b 1
 )
 
 echo.
-echo [INFO] 設定ファイルをGPU用に更新中...
+echo [INFO] Updating configuration for GPU use...
 if exist config\translator.ini (
     powershell -Command "(Get-Content config\translator.ini) -replace 'device = cpu', 'device = cuda' | Set-Content config\translator.ini"
-    echo [SUCCESS] 設定を 'device = cuda' に変更しました。
+    echo [SUCCESS] Changed setting to 'device = cuda'.
 ) else (
-    echo [WARNING] 設定ファイルが見つかりません。手動で device = cuda に設定してください。
+    echo [WARNING] Configuration file not found. Please set device = cuda manually.
 )
 
 echo.
 echo ======================================================
-echo GPU対応のインストールが完了しました！
+echo GPU support installation completed!
 echo ======================================================
 echo.
-echo 次回サーバー起動時からGPUが使用されます。
-echo GPUメモリ不足エラーが発生する場合は、
-echo config\translator.ini で device = cpu に戻してください。
+echo GPU will be used from next server startup.
+echo If GPU memory errors occur, change device = cpu
+echo in config\translator.ini.
 echo.
 pause 

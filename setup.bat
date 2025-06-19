@@ -1,38 +1,37 @@
 @echo off
-chcp 65001 > nul
 echo.
 echo ======================================================
-echo     MenZ翻訳サーバー - Windows セットアップ
+echo     MenZ Translation Server - Windows Setup
 echo ======================================================
 echo.
 
-:: 管理者権限チェック
+:: Check admin privileges
 net session >nul 2>&1
 if %errorLevel% == 0 (
-    echo [INFO] 管理者権限で実行されています
+    echo [INFO] Running with administrator privileges
 ) else (
-    echo [WARNING] 管理者権限で実行することを推奨します
-    echo           （ファイアウォール設定のため）
+    echo [WARNING] Administrator privileges recommended
+    echo           ^(for firewall configuration^)
 )
 
 echo.
-echo [1/6] Python のバージョンを確認中...
+echo [1/6] Checking Python version...
 python --version
 if %errorlevel% neq 0 (
-    echo [ERROR] Python が見つかりません。
-    echo         Python 3.8以上をインストールしてPATHに追加してください。
+    echo [ERROR] Python not found.
+    echo         Please install Python 3.8+ and add to PATH.
     echo         https://www.python.org/downloads/windows/
     pause
     exit /b 1
 )
 
 echo.
-echo [2/6] 仮想環境を作成中...
+echo [2/6] Creating virtual environment...
 if exist venv (
-    echo [INFO] 既存の仮想環境が見つかりました。削除して再作成しますか？ (y/N)
+    echo [INFO] Existing virtual environment found. Recreate? ^(y/N^)
     set /p recreate=
     if /i "!recreate!"=="y" (
-        echo [INFO] 既存の仮想環境を削除中...
+        echo [INFO] Removing existing virtual environment...
         rmdir /s /q venv
     )
 )
@@ -40,46 +39,46 @@ if exist venv (
 if not exist venv (
     python -m venv venv
     if %errorlevel% neq 0 (
-        echo [ERROR] 仮想環境の作成に失敗しました。
+        echo [ERROR] Failed to create virtual environment.
         pause
         exit /b 1
     )
-    echo [SUCCESS] 仮想環境を作成しました。
+    echo [SUCCESS] Virtual environment created.
 )
 
 echo.
-echo [3/6] 仮想環境をアクティベート中...
+echo [3/6] Activating virtual environment...
 call venv\Scripts\activate.bat
 if %errorlevel% neq 0 (
-    echo [ERROR] 仮想環境のアクティベートに失敗しました。
+    echo [ERROR] Failed to activate virtual environment.
     pause
     exit /b 1
 )
 
 echo.
-echo [4/6] 依存関係をインストール中...
-echo [INFO] これには数分かかる場合があります...
+echo [4/6] Installing dependencies...
+echo [INFO] This may take several minutes...
 pip install --upgrade pip
 pip install -r requirements.txt
 if %errorlevel% neq 0 (
-    echo [ERROR] 依存関係のインストールに失敗しました。
-    echo [HINT] インターネット接続を確認してください。
+    echo [ERROR] Failed to install dependencies.
+    echo [HINT] Please check your internet connection.
     pause
     exit /b 1
 )
 
 echo.
-echo [5/6] 必要なディレクトリを作成中...
+echo [5/6] Creating necessary directories...
 if not exist config mkdir config
 if not exist logs mkdir logs
 
 echo.
-echo [6/6] 設定ファイルを作成中...
+echo [6/6] Creating configuration file...
 if not exist config\translator.ini (
-    echo [INFO] デフォルト設定ファイルを作成中...
+    echo [INFO] Creating default configuration file...
     copy /y config_windows_sample.ini config\translator.ini > nul
     if %errorlevel% neq 0 (
-        echo [INFO] サンプル設定が見つからないため、基本設定を作成します...
+        echo [INFO] Sample config not found, creating basic config...
         (
             echo [SERVER]
             echo host = 127.0.0.1
@@ -104,23 +103,23 @@ if not exist config\translator.ini (
             echo backup_count = 3
         ) > config\translator.ini
     )
-    echo [SUCCESS] 設定ファイルを作成しました: config\translator.ini
+    echo [SUCCESS] Configuration file created: config\translator.ini
 ) else (
-    echo [INFO] 既存の設定ファイルを使用します: config\translator.ini
+    echo [INFO] Using existing configuration: config\translator.ini
 )
 
 echo.
 echo ======================================================
-echo セットアップが完了しました！
+echo Setup completed successfully!
 echo ======================================================
 echo.
-echo 次のステップ:
-echo   1. 必要に応じて config\translator.ini を編集
-echo      - NVIDIA GPU搭載PC: device = cuda
-echo      - CPU使用: device = cpu
+echo Next steps:
+echo   1. Edit config\translator.ini if needed
+echo      - NVIDIA GPU PC: device = cuda
+echo      - CPU only: device = cpu
 echo.
-echo   2. サーバーを起動: run.bat をダブルクリック
+echo   2. Start server: Double-click run.bat
 echo.
-echo ※ ファイアウォールの警告が表示された場合は「アクセスを許可」してください
+echo Note: Allow access if Windows Firewall asks for permission
 echo.
 pause 
