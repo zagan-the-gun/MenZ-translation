@@ -1,0 +1,23 @@
+# MenZ翻訳サーバー 依存関係
+# 基本フレームワーク
+torch>=2.0.0
+transformers>=4.21.0
+tokenizers>=0.13.0
+
+# WebSocket通信
+websockets>=11.0.0
+
+# 設定管理
+configparser
+
+# 型ヒント（Python 3.8以下の場合）
+typing-extensions>=4.0.0
+
+# その他ユーティリティ
+numpy>=1.21.0
+tqdm>=4.64.0
+
+# 開発・デバッグ用（オプション）
+# pytest>=7.0.0
+# black>=22.0.0
+# flake8>=4.0.0 
