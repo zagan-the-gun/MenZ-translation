@@ -52,9 +52,10 @@ class TranslationWebSocketServer:
             logging.error(f"コンポーネント初期化エラー: {e}")
             raise
     
-    async def handle_client(self, websocket, path):
+    async def handle_client(self, websocket):
         """クライアント接続の処理"""
         client_id = f"client_{uuid.uuid4().hex[:8]}"
+        path = getattr(websocket, 'path', '/')
         self.connected_clients.add(websocket)
         
         try:
