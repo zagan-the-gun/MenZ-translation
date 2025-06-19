@@ -84,7 +84,7 @@ Unity アプリケーションやその他のクライアントアプリケー�
 ```ini
 [SERVER]
 host = 127.0.0.1
-port = 8765
+port = 55001
 max_connections = 50
 
 [TRANSLATION]
@@ -107,7 +107,7 @@ file = logs/translator.log
 ### WebSocket接続
 
 ```javascript
-const ws = new WebSocket('ws://127.0.0.1:8765');
+const ws = new WebSocket('ws://127.0.0.1:55001');
 ```
 
 ### 翻訳リクエスト
@@ -165,7 +165,7 @@ public class MenZTranslationClient : MonoBehaviour
     
     void Start()
     {
-        ws = new WebSocket("ws://127.0.0.1:8765");
+        ws = new WebSocket("ws://127.0.0.1:55001");
         ws.Connect();
     }
     
