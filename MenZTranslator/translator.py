@@ -128,21 +128,63 @@ class NLLBTranslator:
         """文脈を含むプロンプトを構築"""
         context_examples = ""
         
-        # 最新の文脈を追加
+        # 最新の2-3件の文脈を追加（翻訳品質向上のため）
         for orig, trans in context_buffer[-3:]:
-            context_examples += f"{orig} → {trans}\n"
+            context_examples += f"{orig} | {trans}\n"
         
-        # 現在の翻訳対象を追加
-        prompt = f"{context_examples}{current_text}"
+        # 現在の翻訳対象を追加（区切り文字で明確に分離）
+        if context_examples:
+            prompt = f"{context_examples}---\n{current_text}"
+        else:
+            prompt = current_text
         
         return prompt
     
     def _extract_translation_result(self, result: str, prompt: str) -> str:
         """プロンプトから翻訳結果のみを抽出"""
-        # 簡単な実装：結果から元のテキストを除去
-        lines = result.split('\n')
-        if lines:
-            return lines[-1].strip()
+        try:
+            # 区切り文字"---"がある場合、その後の部分のみを対象とする
+            if "---" in prompt:
+                # プロンプトの構造を理解
+                prompt_parts = prompt.split("---")
+                if len(prompt_parts) >= 2:
+                    original_text = prompt_parts[-1].strip()
+                    
+                    # 結果から区切り文字以降の部分を探す
+                    if "---" in result:
+                        result_parts = result.split("---")
+                        if len(result_parts) >= 2:
+                            new_translation = result_parts[-1].strip()
+                            # さらにパイプ文字区切りがある場合は最後の部分
+                            if "|" in new_translation:
+                                translation_parts = new_translation.split("|")
+                                return translation_parts[-1].strip()
+                            return new_translation
+                    
+                    # 区切り文字がない場合、結果の最後の部分を取得
+                    result_lines = result.split('\n')
+                    # 文脈行をスキップして新しい翻訳のみを取得
+                    context_line_count = len(prompt.split('\n')) - 1
+                    if len(result_lines) > context_line_count:
+                        new_lines = result_lines[context_line_count:]
+                        return '\n'.join(new_lines).strip()
+            
+            # プロンプトに"|"区切りがある場合の処理
+            if "|" in result:
+                # 結果の最後の"|"以降の部分を取得
+                parts = result.split("|")
+                return parts[-1].strip()
+            
+            # フォールバック：最後の行を返す
+            lines = result.split('\n')
+            if lines:
+                return lines[-1].strip()
+                
+        except Exception as e:
+            logging.warning(f"翻訳結果抽出エラー: {e}")
+            # エラー時は結果全体を返す
+            return result.strip()
+        
         return result.strip()
     
     def get_supported_languages(self) -> Dict[str, str]:
