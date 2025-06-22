@@ -333,27 +333,44 @@ class TranslationWebSocketServer:
                 logging.info(f"{len(self.connected_clients)}個のクライアント接続を切断中...")
                 disconnect_tasks = []
                 for websocket in self.connected_clients.copy():
-                    disconnect_tasks.append(websocket.close())
+                    try:
+                        # より確実にクライアントを切断
+                        if not websocket.closed:
+                            disconnect_tasks.append(websocket.close(code=1001, reason="Server shutdown"))
+                    except Exception as e:
+                        logging.warning(f"クライアント切断エラー: {e}")
                 
                 if disconnect_tasks:
                     try:
                         await asyncio.wait_for(
                             asyncio.gather(*disconnect_tasks, return_exceptions=True),
-                            timeout=5.0
+                            timeout=3.0  # タイムアウトを短縮
                         )
                     except asyncio.TimeoutError:
                         logging.warning("クライアント切断がタイムアウトしました")
+                    except Exception as e:
+                        logging.warning(f"クライアント切断処理エラー: {e}")
             
             # サーバーを停止
-            self.server.close()
-            
             try:
-                await asyncio.wait_for(self.server.wait_closed(), timeout=10.0)
+                self.server.close()
+                logging.info("サーバークローズを要求しました")
+            except Exception as e:
+                logging.error(f"サーバークローズエラー: {e}")
+            
+            # サーバーの完全停止を待機（Windows対応改善）
+            try:
+                await asyncio.wait_for(self.server.wait_closed(), timeout=5.0)
                 logging.info("サーバーが正常に停止しました")
             except asyncio.TimeoutError:
-                logging.warning("サーバー停止がタイムアウトしました")
+                logging.warning("サーバー停止がタイムアウトしました（強制終了）")
+                # Windows環境では強制的にサーバーを None にして終了を促進
+                if sys.platform == "win32":
+                    self.server = None
             except Exception as e:
                 logging.error(f"サーバー停止エラー: {e}")
+                if sys.platform == "win32":
+                    self.server = None
         else:
             logging.info("サーバーは既に停止しています")
     

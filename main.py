@@ -8,6 +8,7 @@ import logging
 import signal
 import sys
 import os
+import threading
 from pathlib import Path
 
 # プロジェクトルートをパスに追加
@@ -15,6 +16,18 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from MenZTranslator import Config, TranslationWebSocketServer
+
+# Windows用のグローバル停止フラグ
+_stop_event = None
+_server_instance = None
+
+def windows_signal_handler(signum, frame):
+    """Windowsでのシグナルハンドラー（同期版）"""
+    global _stop_event, _server_instance
+    print("\n停止シグナルを受信しました。サーバーを停止します...")
+    logging.info("Windows停止シグナルを受信しました。サーバーを停止します...")
+    if _stop_event:
+        _stop_event.set()
 
 
 def setup_logging(config: Config):
@@ -63,6 +76,7 @@ def print_banner():
 
 async def main():
     """メイン処理"""
+    global _stop_event, _server_instance
     server = None
     server_task = None
     
@@ -89,35 +103,40 @@ async def main():
         # サーバー初期化
         logging.info("サーバーを初期化中...")
         server = TranslationWebSocketServer(config)
+        _server_instance = server
         
         # 停止イベント作成
         stop_event = asyncio.Event()
+        _stop_event = stop_event
         
-        # 非同期シグナルハンドラー設定（Windows対応改善）
-        def signal_handler():
-            logging.info("停止シグナルを受信しました。サーバーを停止します...")
-            stop_event.set()
+        # プラットフォーム別シグナル設定（Windows対応大幅改善）
+        signal_handler_installed = False
         
-        # イベントループでのシグナルハンドラー登録
-        loop = asyncio.get_running_loop()
-        
-        # プラットフォーム別シグナル設定（Windows対応改善）
-        try:
-            if sys.platform == "win32":
-                # Windows: SIGINTのみ（より安全に設定）
-                try:
-                    loop.add_signal_handler(signal.SIGINT, signal_handler)
-                    logging.info("Windows用シグナルハンドラーを設定しました")
-                except NotImplementedError:
-                    # ProactorEventLoopではシグナルハンドラーが使えない場合
-                    logging.warning("シグナルハンドラーが使用できません（ProactorEventLoop）")
-            else:
-                # Unix系: SIGINT と SIGTERM
+        if sys.platform == "win32":
+            # Windows: 同期的なシグナルハンドラーを使用
+            try:
+                signal.signal(signal.SIGINT, windows_signal_handler)
+                signal_handler_installed = True
+                logging.info("Windows用シグナルハンドラーを設定しました")
+            except Exception as e:
+                logging.warning(f"Windows用シグナルハンドラー設定エラー: {e}")
+        else:
+            # Unix系: 非同期シグナルハンドラー
+            def unix_signal_handler():
+                logging.info("停止シグナルを受信しました。サーバーを停止します...")
+                stop_event.set()
+            
+            try:
+                loop = asyncio.get_running_loop()
                 for sig in [signal.SIGINT, signal.SIGTERM]:
-                    loop.add_signal_handler(sig, signal_handler)
+                    loop.add_signal_handler(sig, unix_signal_handler)
+                signal_handler_installed = True
                 logging.info("Unix系シグナルハンドラーを設定しました")
-        except Exception as e:
-            logging.warning(f"シグナルハンドラー設定エラー: {e} - 手動停止のみ利用可能")
+            except Exception as e:
+                logging.warning(f"Unix系シグナルハンドラー設定エラー: {e}")
+        
+        if not signal_handler_installed:
+            logging.warning("シグナルハンドラーが設定できませんでした - 手動停止のみ利用可能")
         
         # サーバー起動
         logging.info("=" * 60)
@@ -129,11 +148,26 @@ async def main():
         # サーバータスク開始
         server_task = asyncio.create_task(server.start_server())
         
-        # 停止シグナルまたはサーバー終了を待機
-        done, pending = await asyncio.wait(
-            [server_task, asyncio.create_task(stop_event.wait())],
-            return_when=asyncio.FIRST_COMPLETED
-        )
+        # Windows用の追加的な停止監視タスク
+        if sys.platform == "win32":
+            # 定期的にstop_eventをチェックするタスク
+            async def windows_stop_monitor():
+                while not stop_event.is_set():
+                    await asyncio.sleep(0.1)
+            
+            stop_monitor_task = asyncio.create_task(windows_stop_monitor())
+            
+            # 停止シグナルまたはサーバー終了を待機
+            done, pending = await asyncio.wait(
+                [server_task, stop_monitor_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+        else:
+            # Unix系では従来通り
+            done, pending = await asyncio.wait(
+                [server_task, asyncio.create_task(stop_event.wait())],
+                return_when=asyncio.FIRST_COMPLETED
+            )
         
         # 実際に完了したタスクをチェック
         for task in done:
@@ -152,27 +186,32 @@ async def main():
             if server_task and not server_task.done():
                 server_task.cancel()
                 try:
-                    await server_task
-                except asyncio.CancelledError:
+                    await asyncio.wait_for(server_task, timeout=5.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
             
             # 残りのタスクもキャンセル
             for task in pending:
                 task.cancel()
                 try:
-                    await task
-                except asyncio.CancelledError:
+                    await asyncio.wait_for(task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
         
         logging.info("メイン処理が正常に終了しました")
         
     except KeyboardInterrupt:
-        logging.info("ユーザーによる中断を検出しました")
+        logging.info("ユーザーによる中断を検出しました（KeyboardInterrupt）")
+        print("\nユーザーによる中断を検出しました")
     except Exception as e:
         logging.error(f"サーバー実行エラー: {type(e).__name__}: {str(e)}")
         logging.exception("詳細なエラー情報:")
         raise
     finally:
+        # グローバル変数をクリア
+        _stop_event = None
+        _server_instance = None
+        
         if server:
             await shutdown(server)
 
@@ -221,15 +260,47 @@ if __name__ == "__main__":
     if not check_dependencies():
         sys.exit(1)
     
-    # Windowsでのイベントループポリシー設定（シグナルハンドラー対応）
+    # Windowsでのイベントループポリシー設定（改善版）
     if sys.platform == "win32":
-        # SelectorEventLoopはシグナルハンドラーをサポートする
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        # Windows 10以降でのProactorEventLoopを避けてSelectorEventLoopを使用
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            logging.info("WindowsSelectorEventLoopPolicyを設定しました")
+        except Exception as e:
+            logging.warning(f"イベントループポリシー設定エラー: {e}")
     
-    # サーバー実行
+    # サーバー実行（Windows対応改善）
     try:
-        asyncio.run(main())
+        if sys.platform == "win32":
+            # Windowsでの実行時にKeyboardInterruptをより確実にキャッチ
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(main())
+            except KeyboardInterrupt:
+                print("\nCtrl+Cが検出されました。プログラムを終了します...")
+                logging.info("KeyboardInterrupt による終了")
+            finally:
+                try:
+                    # 残っているタスクをキャンセル
+                    pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+                    if pending_tasks:
+                        logging.info(f"残りタスク {len(pending_tasks)} 個をキャンセル中...")
+                        for task in pending_tasks:
+                            task.cancel()
+                        loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
+                    
+                    loop.close()
+                except Exception as e:
+                    logging.error(f"ループクリーンアップエラー: {e}")
+        else:
+            # Unix系では従来通り
+            asyncio.run(main())
+    
     except Exception as e:
         print(f"致命的エラー: {e}")
+        logging.error(f"致命的エラー: {e}")
         sys.exit(1)
+    
+    print("プログラムが正常に終了しました")
 
