@@ -2,32 +2,22 @@
 設定管理モジュール
 """
 
-import configparser
 import os
-from typing import Dict, Any, Optional
-import logging
+import configparser
+from typing import Any
 
 
 class Config:
     """設定管理クラス"""
     
-    def __init__(self, config_path: str = "config/translator.ini"):
-        self.config_path = config_path
+    def __init__(self, config_file: str = "config/translator.ini"):
+        self.config_path = config_file
         self.config = configparser.ConfigParser()
-        self._load_config()
         
-    def _load_config(self):
-        """設定ファイルを読み込む"""
-        try:
-            if os.path.exists(self.config_path):
-                self.config.read(self.config_path, encoding='utf-8')
-                logging.info(f"設定ファイルを読み込みました: {self.config_path}")
-            else:
-                self._create_default_config()
-                logging.info(f"デフォルト設定ファイルを作成しました: {self.config_path}")
-        except Exception as e:
-            logging.error(f"設定ファイルの読み込みに失敗しました: {e}")
+        if not os.path.exists(config_file):
             self._create_default_config()
+        else:
+            self.config.read(config_file, encoding='utf-8')
     
     def _create_default_config(self):
         """デフォルト設定を作成"""
@@ -41,14 +31,7 @@ class Config:
             'model_name': 'facebook/nllb-200-distilled-1.3B',
             'device': 'auto',  # auto, cpu, cuda, mps
             'gpu_id': '0',  # GPU ID (0, 1, 2, ...) for multi-GPU systems
-            'max_length': '256',
-            'use_context': 'true'
-        }
-        
-        self.config['CONTEXT'] = {
-            'max_context_per_speaker': '5',
-            'context_cleanup_interval': '3600',  # 秒
-            'max_context_length': '512'
+            'max_length': '256'
         }
         
         self.config['LOGGING'] = {
@@ -108,18 +91,6 @@ class Config:
     @property
     def max_length(self) -> int:
         return self.getint('TRANSLATION', 'max_length', 256)
-    
-    @property
-    def use_context(self) -> bool:
-        return self.getboolean('TRANSLATION', 'use_context', True)
-    
-    @property
-    def max_context_per_speaker(self) -> int:
-        return self.getint('CONTEXT', 'max_context_per_speaker', 5)
-    
-    @property
-    def context_cleanup_interval(self) -> int:
-        return self.getint('CONTEXT', 'context_cleanup_interval', 3600)
     
     @property
     def log_level(self) -> str:

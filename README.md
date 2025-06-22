@@ -9,7 +9,6 @@ Unity アプリケーションやその他のクライアントアプリケー�
 **主な特徴:**
 - facebook/nllb-200-distilled-1.3B モデルを使用したオフライン翻訳
 - WebSocket通信によるリアルタイム処理
-- 話者別文脈管理による翻訳精度向上
 - 多言語対応（200以上の言語）
 - GPU/MPS/CPU 自動選択対応
 
@@ -18,7 +17,6 @@ Unity アプリケーションやその他のクライアントアプリケー�
 ### ✅ 実装済み機能
 - 基本的な多言語翻訳
 - WebSocket通信インターフェース
-- 話者別文脈管理（Discord ID、Twitch ユーザーなど）
 - 優先度別リクエスト処理
 - 自動設定ファイル生成
 - ログ機能
@@ -91,11 +89,6 @@ max_connections = 50
 model_name = facebook/nllb-200-distilled-1.3B
 device = auto  # auto, cpu, cuda, mps
 max_length = 256
-use_context = true
-
-[CONTEXT]
-max_context_per_speaker = 5
-context_cleanup_interval = 3600
 
 [LOGGING]
 level = INFO
@@ -115,7 +108,6 @@ const ws = new WebSocket('ws://127.0.0.1:55001');
 ```json
 {
     "request_id": "unique-request-id",
-    "context_id": "discord_user_123",
     "priority": "high",
     "text": "Hello, how are you?",
     "source_lang": "eng_Latn",
@@ -129,8 +121,6 @@ const ws = new WebSocket('ws://127.0.0.1:55001');
 {
     "request_id": "unique-request-id",
     "translated": "こんにちは、元気ですか？",
-    "translation_type": "contextual",
-    "context_id": "discord_user_123",
     "processing_time_ms": 250.5,
     "status": "completed"
 }
@@ -169,12 +159,11 @@ public class MenZTranslationClient : MonoBehaviour
         ws.Connect();
     }
     
-    public async Task<string> TranslateAsync(string text, string userId = null)
+    public async Task<string> TranslateAsync(string text)
     {
         var request = new
         {
             request_id = Guid.NewGuid().ToString(),
-            context_id = userId != null ? $"user_{userId}" : null,
             text = text,
             source_lang = "eng_Latn",
             target_lang = "jpn_Jpan"
@@ -190,24 +179,7 @@ public class MenZTranslationClient : MonoBehaviour
 }
 ```
 
-## 文脈管理
 
-話者別の文脈を管理することで、翻訳精度を向上させます。
-
-```json
-// 同じcontext_idを使用した連続する翻訳
-{
-    "context_id": "discord_user_123",
-    "text": "I have a cat."
-}
-// → "私は猫を飼っています。"
-
-{
-    "context_id": "discord_user_123", 
-    "text": "She is very cute."
-}
-// → "彼女はとても可愛いです。" (文脈から「猫」が「彼女」だと判断)
-```
 
 ## トラブルシューティング
 
@@ -249,7 +221,6 @@ MenZ-translation/
 - `type: "translation"` - 翻訳リクエスト
 - `type: "ping"` - 接続確認
 - `type: "stats"` - 統計情報取得
-- `type: "context_clear"` - 文脈クリア
 
 ## ライセンス
 

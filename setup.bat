@@ -89,12 +89,6 @@ if not exist config\translator.ini (
             echo model_name = facebook/nllb-200-distilled-1.3B
             echo device = cpu
             echo max_length = 128
-            echo use_context = false
-            echo.
-            echo [CONTEXT]
-            echo max_context_per_speaker = 3
-            echo context_cleanup_interval = 3600
-            echo max_context_length = 256
             echo.
             echo [LOGGING]
             echo level = INFO

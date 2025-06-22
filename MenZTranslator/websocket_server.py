@@ -13,7 +13,6 @@ import time
 from websockets.exceptions import ConnectionClosed
 
 from .translator import NLLBTranslator
-from .context_manager import SpeakerContextManager
 from .config import Config
 
 
@@ -23,7 +22,6 @@ class TranslationWebSocketServer:
     def __init__(self, config: Config):
         self.config = config
         self.translator = None
-        self.context_manager = None
         self.connected_clients: Set[websockets.WebSocketServerProtocol] = set()
         self.active_requests: Dict[str, Dict] = {}
         self.server = None
@@ -40,40 +38,56 @@ class TranslationWebSocketServer:
                 gpu_id=self.config.gpu_id
             )
             
-            # 文脈管理初期化
-            if self.config.use_context:
-                logging.info("文脈管理を初期化中...")
-                self.context_manager = SpeakerContextManager(
-                    max_context_per_speaker=self.config.max_context_per_speaker,
-                    cleanup_interval=self.config.context_cleanup_interval
-                )
-            
             logging.info("サーバーコンポーネントの初期化が完了しました")
             
         except Exception as e:
             logging.error(f"コンポーネント初期化エラー: {e}")
             raise
     
-    async def handle_client(self, websocket):
+    async def start_server(self, stop_event: asyncio.Event):
+        """サーバーを開始"""
+        try:
+            # サーバー起動
+            self.server = await websockets.serve(
+                lambda websocket, path: self.handle_client(websocket, path, stop_event),
+                self.config.server_host,
+                self.config.server_port,
+                max_size=1024*1024,  # 1MB
+                ping_interval=30,
+                ping_timeout=10
+            )
+            
+            logging.info(f"WebSocketサーバーが起動しました: ws://{self.config.server_host}:{self.config.server_port}")
+            
+            # 停止イベントを待機
+            await stop_event.wait()
+            
+        except Exception as e:
+            logging.error(f"サーバー起動エラー: {e}")
+            raise
+        finally:
+            if self.server:
+                self.server.close()
+                await self.server.wait_closed()
+                logging.info("WebSocketサーバーが停止しました")
+    
+    async def handle_client(self, websocket, path, stop_event: asyncio.Event):
         """クライアント接続の処理"""
-        client_id = f"client_{uuid.uuid4().hex[:8]}"
-        path = getattr(websocket, 'path', '/')
-        self.connected_clients.add(websocket)
+        client_id = str(uuid.uuid4())[:8]
         
         try:
-            logging.info(f"新しいクライアントが接続しました: {client_id}")
+            self.connected_clients.add(websocket)
+            client_info = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
+            logging.info(f"クライアント接続: {client_id} ({client_info})")
             
-            # 接続確認メッセージを送信
-            await self.send_message(websocket, {
+            # 接続情報を送信
+            await self.send_response(websocket, {
                 "type": "connection",
-                "status": "connected",
                 "client_id": client_id,
                 "server_info": {
                     "model": self.config.model_name,
-                    "device": str(self.translator.device),
-                    "gpu_id": self.config.gpu_id,
-                    "context_enabled": self.config.use_context,
-                    "supported_languages": self.translator.get_supported_languages()
+                    "device": str(self.translator.device) if self.translator else "unknown",
+                    "status": "ready"
                 }
             })
             
@@ -82,12 +96,16 @@ class TranslationWebSocketServer:
                 await self.handle_message(websocket, message, client_id)
                 
         except ConnectionClosed:
-            logging.info(f"クライアントが切断されました: {client_id}")
+            logging.info(f"クライアント切断: {client_id}")
         except Exception as e:
             logging.error(f"クライアント処理エラー ({client_id}): {e}")
-            await self.send_error(websocket, str(e))
         finally:
             self.connected_clients.discard(websocket)
+            # このクライアントのアクティブリクエストをクリーンアップ
+            to_remove = [req_id for req_id, req_data in self.active_requests.items() 
+                        if req_data.get('client_id') == client_id]
+            for req_id in to_remove:
+                self.active_requests.pop(req_id, None)
     
     async def handle_message(self, websocket, message: str, client_id: str):
         """メッセージの処理"""
@@ -101,8 +119,6 @@ class TranslationWebSocketServer:
                 await self.handle_ping(websocket, data)
             elif message_type == 'stats':
                 await self.handle_stats_request(websocket, data)
-            elif message_type == 'context_clear':
-                await self.handle_context_clear(websocket, data)
             else:
                 await self.send_error(websocket, f"不明なメッセージタイプ: {message_type}")
                 
@@ -133,7 +149,6 @@ class TranslationWebSocketServer:
                 return
             
             # パラメータ取得
-            context_id = data.get('context_id')
             priority = data.get('priority', 'normal')
             source_lang = data.get('source_lang', 'eng_Latn')
             target_lang = data.get('target_lang', 'jpn_Jpan')
@@ -142,7 +157,6 @@ class TranslationWebSocketServer:
             # リクエスト記録
             self.active_requests[request_id] = {
                 'client_id': client_id,
-                'context_id': context_id,
                 'priority': priority,
                 'start_time': time.time(),
                 'websocket': websocket
@@ -151,26 +165,12 @@ class TranslationWebSocketServer:
             # 翻訳実行
             start_time = time.time()
             
-            if self.context_manager and context_id:
-                # 文脈考慮翻訳
-                translated_text = self.context_manager.translate_with_speaker_context(
-                    self.translator,
-                    text,
-                    context_id,
-                    source_lang,
-                    target_lang,
-                    max_length
-                )
-                translation_type = "contextual"
-            else:
-                # 単純翻訳
-                translated_text = self.translator.translate(
-                    text,
-                    source_lang,
-                    target_lang,
-                    max_length
-                )
-                translation_type = "simple"
+            translated_text = self.translator.translate(
+                text,
+                source_lang,
+                target_lang,
+                max_length
+            )
             
             processing_time = (time.time() - start_time) * 1000  # ミリ秒
             
@@ -178,8 +178,6 @@ class TranslationWebSocketServer:
             response = {
                 "request_id": request_id,
                 "translated": translated_text,
-                "translation_type": translation_type,
-                "context_id": context_id,
                 "processing_time_ms": round(processing_time, 2),
                 "status": "completed"
             }
@@ -211,177 +209,54 @@ class TranslationWebSocketServer:
                 "type": "stats",
                 "connected_clients": len(self.connected_clients),
                 "active_requests": len(self.active_requests),
-                "translator_ready": self.translator.is_ready() if self.translator else False,
-                "context_enabled": self.config.use_context
+                "translator_ready": self.translator.is_ready() if self.translator else False
             }
-            
-            if self.context_manager:
-                stats["context_stats"] = self.context_manager.get_system_stats()
             
             await self.send_response(websocket, stats)
             
         except Exception as e:
             await self.send_error(websocket, f"統計情報取得エラー: {e}")
     
-    async def handle_context_clear(self, websocket, data: Dict):
-        """文脈クリアリクエストの処理"""
-        try:
-            if not self.context_manager:
-                await self.send_error(websocket, "文脈管理が無効です")
-                return
-            
-            context_id = data.get('context_id')
-            if not context_id:
-                await self.send_error(websocket, "context_id が必要です")
-                return
-            
-            success = self.context_manager.clear_speaker_context(context_id)
-            
-            response = {
-                "type": "context_clear",
-                "context_id": context_id,
-                "success": success,
-                "status": "completed" if success else "not_found"
-            }
-            
-            await self.send_response(websocket, response)
-            
-        except Exception as e:
-            await self.send_error(websocket, f"文脈クリアエラー: {e}")
-    
-    async def send_message(self, websocket, message: Dict):
-        """メッセージ送信"""
-        try:
-            await websocket.send(json.dumps(message, ensure_ascii=False))
-        except Exception as e:
-            logging.error(f"メッセージ送信エラー: {e}")
-    
-    async def send_response(self, websocket, response: Dict):
+    async def send_response(self, websocket, data: Dict):
         """レスポンス送信"""
-        await self.send_message(websocket, response)
+        try:
+            await websocket.send(json.dumps(data, ensure_ascii=False))
+        except Exception as e:
+            logging.error(f"レスポンス送信エラー: {e}")
     
     async def send_error(self, websocket, error_message: str, request_id: Optional[str] = None):
-        """エラーメッセージ送信"""
-        error_response = {
-            "type": "error",
+        """エラーレスポンス送信"""
+        error_data = {
             "error": error_message,
             "status": "error"
         }
         
         if request_id:
-            error_response["request_id"] = request_id
+            error_data["request_id"] = request_id
         
-        await self.send_message(websocket, error_response)
+        await self.send_response(websocket, error_data)
     
-    async def start_server(self):
-        """サーバー開始"""
+    async def shutdown(self):
+        """サーバーのシャットダウン"""
         try:
-            logging.info(f"WebSocketサーバーを開始中: {self.config.server_host}:{self.config.server_port}")
-            
-            # Windowsでの特別なサーバー設定
-            server_kwargs = {
-                'max_size': 1024*1024,  # 1MB
-                'ping_interval': 30,
-                'ping_timeout': 10
-            }
-            
-            # Windows特有の問題回避
-            if sys.platform == "win32":
-                server_kwargs['reuse_port'] = False
-            
-            self.server = await websockets.serve(
-                self.handle_client,
-                self.config.server_host,
-                self.config.server_port,
-                **server_kwargs
-            )
-            
-            logging.info(f"サーバーが起動しました: ws://{self.config.server_host}:{self.config.server_port}")
-            
-            # サーバーが終了するまで待機（キャンセル可能）
-            try:
-                await self.server.wait_closed()
-            except asyncio.CancelledError:
-                logging.info("サーバータスクがキャンセルされました")
-                raise
-            
-        except asyncio.CancelledError:
-            logging.info("サーバー起動がキャンセルされました")
-            raise
-        except OSError as e:
-            # ポート使用中やネットワークエラーの詳細情報
-            if e.errno == 10048:  # Windows: Address already in use
-                logging.error(f"ポート {self.config.server_port} は既に使用されています")
-            elif e.errno == 10013:  # Windows: Permission denied
-                logging.error(f"ポート {self.config.server_port} への接続が拒否されました（管理者権限が必要な可能性があります）")
-            else:
-                logging.error(f"ネットワークエラー: {type(e).__name__}: {e}")
-            logging.exception("ネットワークエラーの詳細:")
-            raise
-        except Exception as e:
-            logging.error(f"サーバー起動エラー: {type(e).__name__}: {e}")
-            logging.exception("サーバー起動エラーの詳細:")
-            raise
-    
-    async def stop_server(self):
-        """サーバー停止"""
-        if self.server:
-            logging.info("サーバーを停止中...")
-            
-            # 接続中のクライアントを全て切断
+            # 全てのクライアント接続を閉じる
             if self.connected_clients:
-                logging.info(f"{len(self.connected_clients)}個のクライアント接続を切断中...")
+                logging.info(f"{len(self.connected_clients)}個の接続を終了中...")
                 disconnect_tasks = []
-                for websocket in self.connected_clients.copy():
+                for client in self.connected_clients.copy():
                     try:
-                        # より確実にクライアントを切断
-                        if not websocket.closed:
-                            disconnect_tasks.append(websocket.close(code=1001, reason="Server shutdown"))
+                        await client.close()
                     except Exception as e:
                         logging.warning(f"クライアント切断エラー: {e}")
                 
-                if disconnect_tasks:
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.gather(*disconnect_tasks, return_exceptions=True),
-                            timeout=3.0  # タイムアウトを短縮
-                        )
-                    except asyncio.TimeoutError:
-                        logging.warning("クライアント切断がタイムアウトしました")
-                    except Exception as e:
-                        logging.warning(f"クライアント切断処理エラー: {e}")
-            
+                self.connected_clients.clear()
+                
             # サーバーを停止
-            try:
+            if self.server:
                 self.server.close()
-                logging.info("サーバークローズを要求しました")
-            except Exception as e:
-                logging.error(f"サーバークローズエラー: {e}")
+                await self.server.wait_closed()
+                
+            logging.info("サーバーのシャットダウンが完了しました")
             
-            # サーバーの完全停止を待機（Windows対応改善）
-            try:
-                await asyncio.wait_for(self.server.wait_closed(), timeout=5.0)
-                logging.info("サーバーが正常に停止しました")
-            except asyncio.TimeoutError:
-                logging.warning("サーバー停止がタイムアウトしました（強制終了）")
-                # Windows環境では強制的にサーバーを None にして終了を促進
-                if sys.platform == "win32":
-                    self.server = None
-            except Exception as e:
-                logging.error(f"サーバー停止エラー: {e}")
-                if sys.platform == "win32":
-                    self.server = None
-        else:
-            logging.info("サーバーは既に停止しています")
-    
-    def get_server_info(self) -> Dict:
-        """サーバー情報を取得"""
-        return {
-            "host": self.config.server_host,
-            "port": self.config.server_port,
-            "model": self.config.model_name,
-            "device": self.config.device,
-            "context_enabled": self.config.use_context,
-            "connected_clients": len(self.connected_clients),
-            "active_requests": len(self.active_requests)
-        } 
+        except Exception as e:
+            logging.error(f"シャットダウンエラー: {e}") 

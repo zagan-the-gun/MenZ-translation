@@ -98,7 +98,7 @@ async def main():
         logging.info(f"  ポート: {config.server_port}")
         logging.info(f"  翻訳モデル: {config.model_name}")
         logging.info(f"  デバイス: {config.device}")
-        logging.info(f"  文脈管理: {'有効' if config.use_context else '無効'}")
+
         
         # サーバー初期化
         logging.info("サーバーを初期化中...")
