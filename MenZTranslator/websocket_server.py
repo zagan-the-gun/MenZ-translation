@@ -36,7 +36,8 @@ class TranslationWebSocketServer:
             logging.info("翻訳エンジンを初期化中...")
             self.translator = NLLBTranslator(
                 model_name=self.config.model_name,
-                device=self.config.device
+                device=self.config.device,
+                gpu_id=self.config.gpu_id
             )
             
             # 文脈管理初期化
@@ -69,6 +70,8 @@ class TranslationWebSocketServer:
                 "client_id": client_id,
                 "server_info": {
                     "model": self.config.model_name,
+                    "device": str(self.translator.device),
+                    "gpu_id": self.config.gpu_id,
                     "context_enabled": self.config.use_context,
                     "supported_languages": self.translator.get_supported_languages()
                 }

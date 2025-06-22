@@ -40,6 +40,7 @@ class Config:
         self.config['TRANSLATION'] = {
             'model_name': 'facebook/nllb-200-distilled-1.3B',
             'device': 'auto',  # auto, cpu, cuda, mps
+            'gpu_id': '0',  # GPU ID (0, 1, 2, ...) for multi-GPU systems
             'max_length': '256',
             'use_context': 'true'
         }
@@ -99,6 +100,10 @@ class Config:
     @property
     def device(self) -> str:
         return self.get('TRANSLATION', 'device', 'auto')
+    
+    @property
+    def gpu_id(self) -> int:
+        return self.getint('TRANSLATION', 'gpu_id', 0)
     
     @property
     def max_length(self) -> int:

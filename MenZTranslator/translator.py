@@ -12,8 +12,9 @@ import time
 class NLLBTranslator:
     """NLLB翻訳エンジンクラス"""
     
-    def __init__(self, model_name: str = "facebook/nllb-200-distilled-1.3B", device: str = "auto"):
+    def __init__(self, model_name: str = "facebook/nllb-200-distilled-1.3B", device: str = "auto", gpu_id: int = 0):
         self.model_name = model_name
+        self.gpu_id = gpu_id
         self.device = self._get_device(device)
         self.model = None
         self.tokenizer = None
@@ -26,11 +27,37 @@ class NLLBTranslator:
                 device = torch.device("mps")
                 logging.info("Apple Silicon MPS デバイスを使用します")
             elif torch.cuda.is_available():
-                device = torch.device("cuda")
-                logging.info(f"NVIDIA CUDA デバイスを使用します: {torch.cuda.get_device_name(0)}")
+                if self.gpu_id < torch.cuda.device_count():
+                    device = torch.device(f"cuda:{self.gpu_id}")
+                    logging.info(f"NVIDIA CUDA GPU {self.gpu_id} を使用します: {torch.cuda.get_device_name(self.gpu_id)}")
+                else:
+                    logging.warning(f"指定されたGPU ID {self.gpu_id} は利用できません。GPU 0を使用します")
+                    device = torch.device("cuda:0")
+                    logging.info(f"NVIDIA CUDA GPU 0 を使用します: {torch.cuda.get_device_name(0)}")
             else:
                 device = torch.device("cpu")
                 logging.info("GPU が利用できません。CPUを使用します")
+        elif device_config.startswith("cuda"):
+            # cuda:N の形式で指定された場合
+            if torch.cuda.is_available():
+                if ":" in device_config:
+                    # cuda:N の形式
+                    device = torch.device(device_config)
+                else:
+                    # cudaのみの場合、gpu_idを付加
+                    device = torch.device(f"cuda:{self.gpu_id}")
+                
+                # 指定されたGPUが利用可能かチェック
+                gpu_id = int(str(device).split(":")[-1])
+                if gpu_id < torch.cuda.device_count():
+                    logging.info(f"指定されたGPU {gpu_id} を使用します: {torch.cuda.get_device_name(gpu_id)}")
+                else:
+                    logging.warning(f"指定されたGPU {gpu_id} は利用できません。GPU 0を使用します")
+                    device = torch.device("cuda:0")
+                    logging.info(f"NVIDIA CUDA GPU 0 を使用します: {torch.cuda.get_device_name(0)}")
+            else:
+                logging.warning("CUDA が利用できません。CPUを使用します")
+                device = torch.device("cpu")
         else:
             device = torch.device(device_config)
             logging.info(f"指定されたデバイスを使用します: {device}")
