@@ -49,7 +49,7 @@ class TranslationWebSocketServer:
         try:
             # サーバー起動
             self.server = await websockets.serve(
-                lambda websocket, path: self.handle_client(websocket, path, stop_event),
+                lambda websocket: self.handle_client(websocket, stop_event),
                 self.config.server_host,
                 self.config.server_port,
                 max_size=1024*1024,  # 1MB
@@ -71,7 +71,7 @@ class TranslationWebSocketServer:
                 await self.server.wait_closed()
                 logging.info("WebSocketサーバーが停止しました")
     
-    async def handle_client(self, websocket, path, stop_event: asyncio.Event):
+    async def handle_client(self, websocket, stop_event: asyncio.Event):
         """クライアント接続の処理"""
         client_id = str(uuid.uuid4())[:8]
         
