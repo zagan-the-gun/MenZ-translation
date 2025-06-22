@@ -146,7 +146,7 @@ async def main():
         logging.info("=" * 60)
         
         # サーバータスク開始
-        server_task = asyncio.create_task(server.start_server())
+        server_task = asyncio.create_task(server.start_server(stop_event))
         
         # Windows用の追加的な停止監視タスク
         if sys.platform == "win32":
@@ -220,7 +220,7 @@ async def shutdown(server: TranslationWebSocketServer):
     """サーバー終了処理"""
     try:
         logging.info("サーバーの終了処理を開始します...")
-        await server.stop_server()
+        await server.shutdown()
         logging.info("サーバーが正常に終了しました")
     except Exception as e:
         logging.error(f"終了処理エラー: {e}")
