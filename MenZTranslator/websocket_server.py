@@ -184,8 +184,8 @@ class TranslationWebSocketServer:
             
             await self.send_response(websocket, response)
             
-            # ログ出力
-            logging.info(f"翻訳完了 [{client_id}]: {text[:50]}... -> {translated_text[:50]}... ({processing_time:.1f}ms)")
+            # ログ出力（完全なテキストを表示）
+            logging.info(f"翻訳完了 [{client_id}]: 元テキスト='{text}' -> 翻訳結果='{translated_text}' ({processing_time:.1f}ms)")
             
         except Exception as e:
             logging.error(f"翻訳処理エラー: {e}")
