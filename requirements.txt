@@ -7,6 +7,9 @@ tokenizers>=0.13.0
 # WebSocket通信
 websockets>=11.0.0
 
+# 言語検出（自動検出機能用）
+langdetect>=1.0.9
+
 # 設定管理
 configparser
 

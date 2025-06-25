@@ -7,6 +7,15 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 import logging
 from typing import Optional, Dict, Any
 import time
+import re
+
+# 言語検出用のライブラリ（オプション）
+try:
+    from langdetect import detect
+    LANGDETECT_AVAILABLE = True
+except ImportError:
+    LANGDETECT_AVAILABLE = False
+    logging.warning("langdetectが利用できません。自動言語検出は無効化されます。")
 
 
 class NLLBTranslator:
@@ -20,6 +29,83 @@ class NLLBTranslator:
         self.tokenizer = None
         self._initialize_model()
         
+        # 言語検出マッピング
+        self.lang_detect_to_nllb = {
+            'en': 'eng_Latn',
+            'ja': 'jpn_Jpan', 
+            'zh-cn': 'zho_Hans',
+            'zh-tw': 'zho_Hant',
+            'ko': 'kor_Hang',
+            'fr': 'fra_Latn',
+            'de': 'deu_Latn',
+            'es': 'spa_Latn',
+            'it': 'ita_Latn',
+            'ru': 'rus_Cyrl',
+            'ar': 'arb_Arab',
+            'hi': 'hin_Deva',
+            'th': 'tha_Thai',
+            'vi': 'vie_Latn',
+            'pt': 'por_Latn',
+            'nl': 'nld_Latn',
+            'tr': 'tur_Latn',
+            'pl': 'pol_Latn',
+            'sv': 'swe_Latn',
+            'da': 'dan_Latn',
+            'no': 'nor_Latn',
+            'fi': 'fin_Latn',
+            'he': 'heb_Hebr',
+            'cs': 'ces_Latn',
+            'hu': 'hun_Latn',
+            'ro': 'ron_Latn',
+            'bg': 'bul_Cyrl',
+            'hr': 'hrv_Latn',
+            'sk': 'slk_Latn',
+            'sl': 'slv_Latn',
+            'et': 'est_Latn',
+            'lv': 'lav_Latn',
+            'lt': 'lit_Latn',
+            'uk': 'ukr_Cyrl',
+            'el': 'ell_Grek',
+            'ca': 'cat_Latn',
+            'eu': 'eus_Latn',
+            'gl': 'glg_Latn',
+            'cy': 'cym_Latn',
+            'ga': 'gle_Latn',
+            'mt': 'mlt_Latn',
+            'is': 'isl_Latn',
+            'mk': 'mkd_Cyrl',
+            'sq': 'sqi_Latn',
+            'af': 'afr_Latn',
+            'sw': 'swh_Latn',
+            'zu': 'zul_Latn',
+            'xh': 'xho_Latn',
+            'id': 'ind_Latn',
+            'ms': 'zsm_Latn',
+            'tl': 'tgl_Latn',
+            'bn': 'ben_Beng',
+            'ur': 'urd_Arab',
+            'fa': 'pes_Arab',
+            'ta': 'tam_Taml',
+            'te': 'tel_Telu',
+            'kn': 'kan_Knda',
+            'ml': 'mal_Mlym',
+            'gu': 'guj_Gujr',
+            'pa': 'pan_Guru',
+            'ne': 'npi_Deva',
+            'si': 'sin_Sinh',
+            'my': 'mya_Mymr',
+            'km': 'khm_Khmr',
+            'lo': 'lao_Laoo',
+            'ka': 'kat_Geor',
+            'hy': 'hye_Armn',
+            'az': 'azj_Latn',
+            'kk': 'kaz_Cyrl',
+            'ky': 'kir_Cyrl',
+            'uz': 'uzn_Latn',
+            'tg': 'tgk_Cyrl',
+            'mn': 'khk_Cyrl'
+        }
+    
     def _get_device(self, device_config: str) -> torch.device:
         """デバイスを自動選択または指定"""
         if device_config == "auto":
@@ -91,6 +177,25 @@ class NLLBTranslator:
             if not text.strip():
                 return ""
             
+            # 言語コードの検証と自動検出
+            if source_lang.lower() == "auto":
+                logging.info("source_lang に 'auto' が指定されました。自動言語検出を実行します")
+                source_lang = self._detect_language(text)
+            
+            if target_lang.lower() == "auto":
+                logging.warning("target_lang に 'auto' が指定されました。デフォルトの 'jpn_Jpan' を使用します")
+                target_lang = "jpn_Jpan"
+            
+            # 有効な言語コードかチェック（NLLBの標準形式: xxx_Xxxx）
+            lang_pattern = r'^[a-z]{3}_[A-Z][a-z]{3}$'
+            if not re.match(lang_pattern, source_lang):
+                logging.warning(f"無効なsource_lang '{source_lang}' が指定されました。デフォルトの 'eng_Latn' を使用します")
+                source_lang = "eng_Latn"
+            
+            if not re.match(lang_pattern, target_lang):
+                logging.warning(f"無効なtarget_lang '{target_lang}' が指定されました。デフォルトの 'jpn_Jpan' を使用します")
+                target_lang = "jpn_Jpan"
+            
             # トークナイザーの言語設定
             self.tokenizer.src_lang = source_lang
             
@@ -143,3 +248,23 @@ class NLLBTranslator:
     def is_ready(self) -> bool:
         """翻訳エンジンが準備完了かチェック"""
         return self.model is not None and self.tokenizer is not None 
+
+    def _detect_language(self, text: str) -> str:
+        """テキストの言語を自動検出してNLLB言語コードを返す"""
+        if not LANGDETECT_AVAILABLE:
+            logging.warning("言語検出ライブラリが利用できません。デフォルトの 'eng_Latn' を使用します")
+            return 'eng_Latn'
+        
+        try:
+            detected_lang = detect(text)
+            logging.info(f"検出された言語: {detected_lang}")
+            
+            # NLLBコードに変換
+            nllb_code = self.lang_detect_to_nllb.get(detected_lang, 'eng_Latn')
+            logging.info(f"NLLBコード変換: {detected_lang} → {nllb_code}")
+            
+            return nllb_code
+            
+        except Exception as e:
+            logging.warning(f"言語検出エラー: {e}。デフォルトの 'eng_Latn' を使用します")
+            return 'eng_Latn' 

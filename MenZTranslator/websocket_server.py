@@ -154,6 +154,15 @@ class TranslationWebSocketServer:
             target_lang = data.get('target_lang', 'jpn_Jpan')
             max_length = data.get('max_length', self.config.max_length)
             
+            # 言語コードの検証と自動検出
+            if source_lang.lower() == "auto":
+                logging.info(f"クライアント {client_id}: source_lang に 'auto' が指定されました。自動言語検出を実行します")
+                # translator.translate内で自動検出が実行されるため、そのまま渡す
+            
+            if target_lang.lower() == "auto":
+                logging.warning(f"クライアント {client_id}: target_lang に 'auto' が指定されました。デフォルトの 'jpn_Jpan' を使用します")
+                target_lang = 'jpn_Jpan'
+            
             # リクエスト記録
             self.active_requests[request_id] = {
                 'client_id': client_id,
