@@ -21,9 +21,10 @@ except ImportError:
 class NLLBTranslator:
     """NLLB翻訳エンジンクラス"""
     
-    def __init__(self, model_name: str = "facebook/nllb-200-distilled-1.3B", device: str = "auto", gpu_id: int = 0):
+    def __init__(self, model_name: str = "facebook/nllb-200-distilled-1.3B", device: str = "auto", gpu_id: int = 0, use_fp16: bool = False):
         self.model_name = model_name
         self.gpu_id = gpu_id
+        self.use_fp16 = use_fp16
         self.device = self._get_device(device)
         self.model = None
         self.tokenizer = None
@@ -154,14 +155,27 @@ class NLLBTranslator:
         """モデルとトークナイザーを初期化"""
         try:
             logging.info(f"モデルを読み込み中: {self.model_name}")
+            if self.use_fp16:
+                logging.info("FP16（半精度）モードで読み込みます")
             start_time = time.time()
             
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
+            
+            # FP16対応
+            if self.use_fp16:
+                if torch.cuda.is_available() and str(self.device).startswith('cuda'):
+                    logging.info("FP16（半精度）に変換中...")
+                    self.model = self.model.half()  # FP16に変換
+                else:
+                    logging.warning("FP16はCUDA GPUでのみサポートされています。FP32を使用します")
+                    self.use_fp16 = False
+            
             self.model.to(self.device)
             
             load_time = time.time() - start_time
-            logging.info(f"モデルの読み込みが完了しました ({load_time:.2f}秒)")
+            precision = "FP16" if self.use_fp16 else "FP32"
+            logging.info(f"モデルの読み込みが完了しました ({load_time:.2f}秒, {precision})")
             
         except Exception as e:
             logging.error(f"モデルの初期化に失敗しました: {e}")
@@ -201,6 +215,10 @@ class NLLBTranslator:
             
             # 入力をトークン化
             inputs = self.tokenizer(text, return_tensors="pt", padding=True).to(self.device)
+            
+            # FP16対応：入力もFP16に変換
+            if self.use_fp16 and torch.cuda.is_available() and str(self.device).startswith('cuda'):
+                inputs = {k: v.half() if v.dtype == torch.float32 else v for k, v in inputs.items()}
             
             # 翻訳実行
             with torch.no_grad():

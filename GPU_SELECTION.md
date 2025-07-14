@@ -12,6 +12,7 @@ model_name = facebook/nllb-200-distilled-1.3B
 device = cuda
 gpu_id = 0          # 使用するGPUのID (0, 1, 2, ...)
 max_length = 256
+use_fp16 = true     # FP16（半精度）を使用（メモリ削減・高速化）
 use_context = true
 ```
 
@@ -27,6 +28,12 @@ use_context = true
 - 使用するGPUのID番号を指定（0から開始）
 - `device=cuda` または `device=auto` でCUDAが選択された場合に有効
 - 指定したGPU IDが存在しない場合は、GPU 0 にフォールバックします
+
+### `use_fp16`
+- FP16（半精度浮動小数点）を使用するかどうか
+- `true`: メモリ使用量を約50%削減し、推論速度を向上
+- CUDA GPUでのみ有効（CPUやMPSでは自動的にFP32にフォールバック）
+- 翻訳品質は若干低下する可能性があります
 
 ## 使用例
 

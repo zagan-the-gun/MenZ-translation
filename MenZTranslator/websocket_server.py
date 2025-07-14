@@ -35,7 +35,8 @@ class TranslationWebSocketServer:
             self.translator = NLLBTranslator(
                 model_name=self.config.model_name,
                 device=self.config.device,
-                gpu_id=self.config.gpu_id
+                gpu_id=self.config.gpu_id,
+                use_fp16=self.config.use_fp16
             )
             
             logging.info("サーバーコンポーネントの初期化が完了しました")

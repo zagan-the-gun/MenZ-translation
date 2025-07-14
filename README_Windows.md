@@ -114,6 +114,7 @@ ws.Connect();
 [TRANSLATION]
 device = cuda           # GPU使用
 max_length = 64         # 短文用
+use_fp16 = true         # FP16（半精度）使用（メモリ削減・高速化）
 use_context = false     # 文脈無効
 
 [SERVER]

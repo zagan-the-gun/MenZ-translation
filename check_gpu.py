@@ -62,8 +62,9 @@ def check_gpu_status():
         from MenZTranslator.translator import NLLBTranslator
         
         print("翻訳エンジンでのデバイス確認:")
-        translator = NLLBTranslator(config.model_name, config.device, config.gpu_id)
+        translator = NLLBTranslator(config.model_name, config.device, config.gpu_id, config.use_fp16)
         print(f"  実際に使用されるデバイス: {translator.device}")
+        print(f"  FP16使用: {translator.use_fp16}")
         
         # 簡単な翻訳テスト
         print()

@@ -89,11 +89,19 @@ max_connections = 50
 model_name = facebook/nllb-200-distilled-1.3B
 device = auto  # auto, cpu, cuda, mps
 max_length = 256
+use_fp16 = false  # FP16（半精度）を使用するかどうか（CUDA GPUでのみ有効）
 
 [LOGGING]
 level = INFO
 file = logs/translator.log
 ```
+
+### パフォーマンス設定
+
+**FP16（半精度）の使用**:
+- `use_fp16 = true`: メモリ使用量を約50%削減し、推論速度を向上
+- CUDA GPUでのみ有効（CPUやMPSでは自動的にFP32にフォールバック）
+- 翻訳品質は若干低下する可能性があります
 
 ## 使用方法
 

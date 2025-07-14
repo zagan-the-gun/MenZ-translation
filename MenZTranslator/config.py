@@ -31,7 +31,8 @@ class Config:
             'model_name': 'facebook/nllb-200-distilled-1.3B',
             'device': 'auto',  # auto, cpu, cuda, mps
             'gpu_id': '0',  # GPU ID (0, 1, 2, ...) for multi-GPU systems
-            'max_length': '256'
+            'max_length': '256',
+            'use_fp16': 'false'  # FP16（半精度）を使用するかどうか
         }
         
         self.config['LOGGING'] = {
@@ -91,6 +92,10 @@ class Config:
     @property
     def max_length(self) -> int:
         return self.getint('TRANSLATION', 'max_length', 256)
+    
+    @property
+    def use_fp16(self) -> bool:
+        return self.getboolean('TRANSLATION', 'use_fp16', False)
     
     @property
     def log_level(self) -> str:
