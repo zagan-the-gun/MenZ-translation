@@ -5,10 +5,9 @@ echo      MenZ Translation Server - Starting...
 echo ======================================================
 echo.
 
-REM 文字コードをUTF-8に設定（日本語対応）
-chcp 65001 > nul
 
 REM Check for both possible venv directories
+cd /d "%~dp0"
 set VENV_DIR=
 if exist venv\Scripts\activate.bat (
     set VENV_DIR=venv
